@@ -65,16 +65,14 @@ class GameState:
         return (len(self.fifths) == 3 and any(v == 8 for v in self.fifths.values()))
     def score(self, choice):
         _, n1, n2 = choice
-        score = 0
-        for point in (n1, n2):
+        def point_score(point, count):
             n = self.points[point-2]
-            if n == 0:
-                score -= 200
-            elif n == 4:
-                score += 200
-            elif n > 4:
-                score += self.scores[point-2]
-        return score
+            s = self.scores[point-2]
+            steps = [-200,0,0,0,200] + [s]*5
+            return sum(steps[n:n+count])
+        if n1 == n2:
+            return point_score(n1, 2)
+        return point_score(n1, 1) + point_score(n2, 1)
 
 def simulate(game_state, strategy):
     while not game_state.finished():

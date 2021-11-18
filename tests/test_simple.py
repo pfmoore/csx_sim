@@ -15,4 +15,4 @@ def test_first_roll():
         for p in permutations(dice)
     }
     for x in all_rolls:
-        assert g.score(x) == -400
+        assert g.score(x) == -400 if x[1] != x[2] else -200
