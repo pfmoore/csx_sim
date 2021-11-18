@@ -1,100 +1,102 @@
+from . import strategies
 from random import randint
 from itertools import permutations
 from statistics import mean, median, stdev
-from dataclasses import dataclass, field
-from collections import Counter
-import copy
 
-SCORES = {2: 100, 3: 70, 4: 60, 5: 50, 6: 40, 7: 30, 8: 40, 9: 50, 10: 60, 11: 70, 12: 100}
-
-@dataclass(frozen=True)
-class Turn:
-    extra: int
-    pairs: tuple[int, int]
-
-@dataclass
-class Game:
-    turns: list[Turn] = field(default_factory=list)
-    extras: Counter = field(default_factory=Counter)
-
-    def add(self, turn: Turn):
-        if turn.extra in self.extras or len(self.extras) < 3:
-            self.extras[turn.extra] += 1
-        self.turns.append(turn)
-
-    def is_valid(self, turn: Turn):
-        return (turn.extra in self.extras or len(self.extras) < 3)
-
-    def is_finished(self):
-        return any(n >= 8 for n in self.extras.values())
-
-    def score(self):
-        counts = Counter(n for t in self.turns for n in t.pairs)
-        score = 0
-        for n, count in counts.items():
-            if count < 5:
-                score -= 200
-            elif count > 5:
-                score += (count - 5) * SCORES[n]
-        return score
-
-    def turn_score(self, turn: Turn):
-        g = Game(copy.copy(self.turns), copy.copy(self.extras))
-        g.add(turn)
-        return g.score() - self.score()
-
-    def valid_choices(self, roll: set[Turn]):
-        # If you have a free fifth die slot,
-        # all choices are valid.
-        if len(self.extras) < 3:
-            return set(roll)
-        # You must choose one of your selected fifth dice
-        choices = {turn for turn in roll if self.is_valid(turn)}
-        # If none of your fifth dice appeared, you get a
-        # free die
-        if not choices:
-            return set(roll)
-        return choices
-
+# Choice: (fifth, n1, n2)
+# Roll: {Choices}
+# GameState: current position on board
+#   points (a "point" is one of the numbers 2-12, need a better name)
+#   fifths (a "fifth" is an extra die, need a better name)
+# gs.score(choice)
+# gs.current_score()
+# gs.valid(choice)
+# gs.finished()
 
 def roll_5d6():
     dice = [randint(1,6) for _ in range(5)]
-    return {Turn(extra=p[0], pairs=(p[1]+p[2], p[3]+p[4])) for p in permutations(dice)}
+    return {(p[0], p[1]+p[2], p[3]+p[4]) for p in permutations(dice)}
 
-def simulate(game: Game, strategy):
-    while not game.is_finished():
-        choices = game.valid_choices(roll_5d6())
-        choice = strategy(choices, game)
-        game.add(choice)
-    return game
+class GameState:
+    def __init__(self):
+        self.points = [0] * 11
+        self.scores = [100,70,60,50,40,30,40,50,60,70,100]
+        self.fifths = {}
+        self.choices = []
+    def current_score(self):
+        total = 0
+        for point in range(2, 13):
+            n = self.points[point-2]
+            if n == 0:
+                continue
+            if n < 5:
+                total -= 200
+            elif n > 5:
+                total += (n-5)*self.scores[point-2]
+        return total
+    def valid_choices(self, roll):
+        # If you have a free fifth die slot,
+        # all choices are valid.
+        if len(self.fifths) < 3:
+            return roll
+        # You must choose one of your selected fifth dice
+        choices = {
+            c for c in roll
+            if c[0] in self.fifths
+        }
+        # If none of your fifth dice appeared, you get a
+        # free die
+        if not choices:
+            choices = {(None, n1, n2) for (_, n1, n2) in roll}
+        return choices
+    def add(self, choice):
+        self.choices.append(choice)
+        fifth, n1, n2 = choice
+        if fifth is None:
+            # None is a free die
+            pass
+        elif fifth in self.fifths:
+            self.fifths[fifth] += 1
+        else:
+            self.fifths[fifth] = 1
+        self.points[n1-2] += 1
+        self.points[n2-2] += 1
+    def finished(self):
+        return (len(self.fifths) == 3 and any(v == 8 for v in self.fifths.values()))
+    def score(self, choice):
+        _, n1, n2 = choice
+        score = 0
+        for point in (n1, n2):
+            n = self.points[point-2]
+            if n == 0:
+                score -= 200
+            elif n == 4:
+                score += 200
+            elif n > 4:
+                score += self.scores[point-2]
+        return score
 
-def report(statname, stat):
-    print(statname)
-    print(f"    Mean: {mean(stat)}")
-    print(f"    Median: {median(stat)}")
-    print(f"    Min: {min(*stat)}")
-    print(f"    Max: {max(*stat)}")
-    print(f"    Std Deviation: {stdev(stat)}")
+def simulate(game_state, strategy):
+    while not game_state.finished():
+        roll = roll_5d6()
+        choice = strategy(roll, game_state)
+        game_state.add(choice)
+    return game_state
 
 def main():
-    from . import strategies
     strats = {
         "dumb": strategies.dumb,
         "score": strategies.score,
         "even_5": strategies.even_5,
-        "central": strategies.score_central,
     }
     for name, strat in strats.items():
         turns = []
         scores = []
         for i in range(1000):
-            g = Game()
+            g = GameState()
             simulate(g, strat)
-            turns.append(len(g.turns))
-            scores.append(g.score())
-
-        print(f"Strategy: {name}")
-        print()
-        report("Turns", turns)
-        report("Score", scores)
-        print("-"*30)
+            turns.append(len(g.choices))
+            scores.append(g.current_score())
+        print(name)
+        print(f"Turns: avg={mean(turns)}, median={median(turns)}, std_dev={stdev(turns)}")
+        print(f"Turns: avg={mean(scores)}, median={median(scores)}, std_dev={stdev(scores)}")
