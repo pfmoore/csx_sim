@@ -77,6 +77,7 @@ class GameState:
 def simulate(game_state, strategy):
     while not game_state.finished():
         roll = roll_5d6()
+        roll = game_state.valid_choices(roll)
         choice = strategy(roll, game_state)
         game_state.add(choice)
     return game_state
